@@ -64,3 +64,104 @@ ser = hist_price_dl() # Not passing any argument since they are set by default
 price_matrix = price_matrix_creator(ser) # Creating a matrix using the dataframe
 price_matrix = normalize_windows(price_matrix) # Normalizing its values to fit to RNN
 row, X_train, y_train, X_test, y_test = train_test_split_(price_matrix) # Applying train-test splitting, also returning the splitting-point
+
+#Time to build RNN
+
+from keras.models import Sequential
+from keras.layers import LSTM, Dense, Activation
+import time
+# LSTM Model parameters, I chose
+batch_size = 2            # Batch size (you may try different values)
+epochs = 15               # Epoch (you may try different values)
+seq_len = 30              # 30 sequence data (Representing the last 30 days)
+loss='mean_squared_error' # Since the metric is MSE/RMSE
+optimizer = 'rmsprop'     # Recommended optimizer for RNN
+activation = 'linear'     # Linear activation
+input_shape=(None,1)      # Input dimension
+output_dim = 30           # Output dimension
+
+model = Sequential()
+model.add(LSTM(units=output_dim, return_sequences=True, input_shape=input_shape))
+model.add(Dense(units=32,activation=activation))
+model.add(LSTM(units=output_dim, return_sequences=False))
+model.add(Dense(units=1,activation=activation))
+model.compile(optimizer=optimizer,loss=loss)
+
+start_time = time.time()
+model.fit(x=X_train,
+          y=y_train,
+          batch_size=batch_size,
+          epochs=epochs,
+          validation_split=0.05)
+end_time = time.time()
+processing_time = end_time - start_time
+
+
+model.save('coin_predictor.h5')
+
+import requests,json,numpy as np,pandas as pd
+#We need ser, preds, row
+ser = hist_price_dl(timeframe='30d')[1:31]
+price_matrix = price_matrix_creator(ser)
+X_test = normalize_windows(price_matrix)
+X_test = np.array(X_test)
+X_test = np.reshape(X_test, (X_test.shape[0], X_test.shape[1], 1))
+
+from keras.models import load_model
+model = load_model('coin_predictor.h5')
+preds = model.predict(X_test, batch_size=2)
+
+def deserializer(preds, data, train_size=0.9, train_phase=False):
+    '''
+    Arguments:
+    preds : Predictions to be converted back to their original values
+    data : It takes the data into account because the normalization was made based on the full historic data
+    train_size : Only applicable when used in train_phase
+    train_phase : When a train-test split is made, this should be set to True so that a cut point (row) is calculated based on the train_size argument, otherwise cut point is set to 0
+    
+    Returns:
+    A list of deserialized prediction values, original true values, and date values for plotting
+    '''
+    price_matrix = np.array(price_matrix_creator(ser))
+    if train_phase:
+        row = int(round(train_size * len(price_matrix)))
+        print(row)
+    else:
+        row=0
+    date = ser.index[row+29:]
+    date = np.reshape(date, (date.shape[0]))
+    X_test = price_matrix[row:,:-1]
+    y_test = price_matrix[row:,-1]
+    preds_original = []
+    preds = np.reshape(preds, (preds.shape[0]))
+    for index in range(0, len(preds)):
+        pred = (preds[index]+1)* X_test[index][0]
+        preds_original.append(pred)
+    preds_original = np.array(preds_original)
+    if train_phase:
+        return [date, y_test, preds_original]
+    else:
+        import datetime
+        return [date+datetime.timedelta(days=1),y_test]
+
+
+final_pred = deserializer(preds, ser, train_size=0.9, train_phase=False)
+final_pred[1][0]
+
+from keras.models import load_model
+model = load_model('coin_predictor.h5')
+preds = model.predict(X_test, batch_size=2)
+plotlist = deserializer(preds, ser, train_phase=True)
+
+
+from plotly import __version__
+from plotly.offline import download_plotlyjs, init_notebook_mode, plot, iplot
+import plotly.graph_objs as go
+init_notebook_mode(connected=True)
+
+prices = pd.DataFrame({'Predictions':plotlist[1], 'Real Prices':plotlist[2]},index=plotlist[0])
+iplot(prices.iplot(asFigure=True,
+                   kind='scatter',
+                   xTitle='Date',
+                   yTitle='BTC Price',
+                   title='BTC Price Predictions'))
