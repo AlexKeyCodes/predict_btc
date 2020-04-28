@@ -1,6 +1,5 @@
 # predict_btc
-CS4347 group project
+CS4347 Group project
 
-I was unable to get btc.py to run correctly. When denormalizing the data I was running into errors.
+btc_errors.py runs into errors when denormalizing the data. Please run btc.py.
 
-I ended up restarting and using a different method. The btc_second.py runs correctly.
